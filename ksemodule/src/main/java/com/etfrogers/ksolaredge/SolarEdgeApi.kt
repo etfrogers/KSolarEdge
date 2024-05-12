@@ -1,5 +1,7 @@
 package com.etfrogers.ksolaredge
 
+import com.etfrogers.ksolaredge.serialisers.SitePowerFlow
+import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.SerialName
@@ -8,6 +10,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.scalars.ScalarsConverterFactory
 import retrofit2.http.GET
 import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
 import retrofit2.http.Query
 import java.io.File
 
@@ -30,12 +33,13 @@ private val SITE_URL = "$API_URL/site/${CONFIG.siteID}/"
 
 private val retrofit = Retrofit.Builder()
     .addConverterFactory(ScalarsConverterFactory.create())
+    .addConverterFactory(Json.asConverterFactory("application/json".toMediaType()))
     .baseUrl(SITE_URL)
     .build()
 
 interface SolarEdgeApiService {
     @GET("currentPowerFlow")
-    suspend fun getPowerFlow(@Query("api_key") apiKey: String): String
+    suspend fun getPowerFlow(@Query("api_key") apiKey: String): SitePowerFlow
 }
 
 object SolarEdgeApi {
@@ -45,7 +49,7 @@ object SolarEdgeApi {
 }
 
 fun main(){
-    var solarEdgeText = ""
+    var solarEdgeText: SitePowerFlow
     runBlocking {
         val def = async { SolarEdgeApi.retrofitService.getPowerFlow(CONFIG.apiKey) }
         solarEdgeText = def.await()
