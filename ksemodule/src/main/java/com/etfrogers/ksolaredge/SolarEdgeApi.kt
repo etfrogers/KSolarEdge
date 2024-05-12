@@ -10,7 +10,10 @@ import retrofit2.Retrofit
 import retrofit2.converter.scalars.ScalarsConverterFactory
 import retrofit2.http.GET
 import kotlinx.serialization.json.Json
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Response
 import retrofit2.http.Query
 import java.io.File
 
@@ -24,22 +27,24 @@ private data class SolarEdgeConfig(
     @SerialName("storage-profile-name") val storageProfileName: String,
     )
 
-
 val text = File("config.json").readText()
 private val CONFIG = Json.decodeFromString<SolarEdgeConfig>(text)
-
-
 private val SITE_URL = "$API_URL/site/${CONFIG.siteID}/"
+
+private val client = OkHttpClient.Builder()
+    .addInterceptor(APIKeyInterceptor())
+    .build()
 
 private val retrofit = Retrofit.Builder()
     .addConverterFactory(ScalarsConverterFactory.create())
     .addConverterFactory(Json.asConverterFactory("application/json".toMediaType()))
     .baseUrl(SITE_URL)
+    .client(client)
     .build()
 
 interface SolarEdgeApiService {
     @GET("currentPowerFlow")
-    suspend fun getPowerFlow(@Query("api_key") apiKey: String): SitePowerFlow
+    suspend fun getPowerFlow(): SitePowerFlow
 }
 
 object SolarEdgeApi {
@@ -48,10 +53,20 @@ object SolarEdgeApi {
     }
 }
 
+class APIKeyInterceptor : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val currentUrl = chain.request().url
+        val newUrl = currentUrl.newBuilder().addQueryParameter("api_key", CONFIG.apiKey).build()
+        val currentRequest = chain.request().newBuilder()
+        val newRequest = currentRequest.url(newUrl).build()
+        return chain.proceed(newRequest)
+    }
+}
+
 fun main(){
     var solarEdgeText: SitePowerFlow
     runBlocking {
-        val def = async { SolarEdgeApi.retrofitService.getPowerFlow(CONFIG.apiKey) }
+        val def = async { SolarEdgeApi.retrofitService.getPowerFlow() }
         solarEdgeText = def.await()
     }
     println(solarEdgeText)
