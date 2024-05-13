@@ -14,59 +14,62 @@ import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Response
-import retrofit2.http.Query
 import java.io.File
 
 private const val API_URL = "https://monitoringapi.solaredge.com"
 
 @Serializable
-private data class SolarEdgeConfig(
+data class SolarEdgeConfig(
     @SerialName("api-key") val apiKey: String,
     @SerialName("site-id") val siteID: String,
     @SerialName("account-id") val accountID: String,
     @SerialName("storage-profile-name") val storageProfileName: String,
     )
 
-val text = File("config.json").readText()
-private val CONFIG = Json.decodeFromString<SolarEdgeConfig>(text)
-private val SITE_URL = "$API_URL/site/${CONFIG.siteID}/"
-
-private val client = OkHttpClient.Builder()
-    .addInterceptor(APIKeyInterceptor())
-    .build()
-
-private val retrofit = Retrofit.Builder()
-    .addConverterFactory(ScalarsConverterFactory.create())
-    .addConverterFactory(Json.asConverterFactory("application/json".toMediaType()))
-    .baseUrl(SITE_URL)
-    .client(client)
-    .build()
 
 interface SolarEdgeApiService {
     @GET("currentPowerFlow")
     suspend fun getPowerFlow(): SitePowerFlow
 }
 
-object SolarEdgeApi {
+
+class SolarEdgeApi(siteID: String, apiKey: String) {
+    private val siteUrl = "$API_URL/site/${siteID}/"
+    private val client = OkHttpClient.Builder()
+        .addInterceptor(APIKeyInterceptor(apiKey))
+        .build()
+
+    private val retrofit = Retrofit.Builder()
+        .addConverterFactory(ScalarsConverterFactory.create())
+        .addConverterFactory(Json.asConverterFactory("application/json".toMediaType()))
+        .baseUrl(siteUrl)
+        .client(client)
+        .build()
+
     val retrofitService: SolarEdgeApiService by lazy {
         retrofit.create(SolarEdgeApiService::class.java)
     }
 }
 
-class APIKeyInterceptor : Interceptor {
+
+class APIKeyInterceptor(private val apiKey: String) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val currentUrl = chain.request().url
-        val newUrl = currentUrl.newBuilder().addQueryParameter("api_key", CONFIG.apiKey).build()
+        val newUrl = currentUrl.newBuilder().addQueryParameter("api_key", apiKey).build()
         val currentRequest = chain.request().newBuilder()
         val newRequest = currentRequest.url(newUrl).build()
         return chain.proceed(newRequest)
     }
 }
 
+
 fun main(){
+    val text = File("config.json").readText()
+    val config = Json.decodeFromString<SolarEdgeConfig>(text)
+
     var solarEdgeText: SitePowerFlow
     runBlocking {
-        val def = async { SolarEdgeApi.retrofitService.getPowerFlow() }
+        val def = async { SolarEdgeApi(config.siteID, config.apiKey).retrofitService.getPowerFlow() }
         solarEdgeText = def.await()
     }
     println(solarEdgeText)
