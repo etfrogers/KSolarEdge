@@ -5,12 +5,12 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class SitePowerFlow(
-    val siteCurrentPowerFlow: FlowData
+data class SitePowerFlowContainer(
+    val siteCurrentPowerFlow: SitePowerFlow
 )
 
 @Serializable
-data class FlowData (
+data class SitePowerFlow (
     val updateRefreshRate: Int,
     val unit: String,
     val connections: List<Connection>,

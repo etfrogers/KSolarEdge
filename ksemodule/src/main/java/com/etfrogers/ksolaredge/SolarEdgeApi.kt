@@ -1,6 +1,10 @@
 package com.etfrogers.ksolaredge
 
+import com.etfrogers.ksolaredge.serialisers.EnergyDetails
+import com.etfrogers.ksolaredge.serialisers.EnergyDetailsContainer
 import com.etfrogers.ksolaredge.serialisers.SitePowerFlow
+import com.etfrogers.ksolaredge.serialisers.SitePowerFlowContainer
+import com.etfrogers.ksolaredge.serialisers.solarEdgeURLFormat
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -14,13 +18,17 @@ import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Response
+import retrofit2.http.Query
 import java.io.File
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.format
 
 private const val API_URL = "https://monitoringapi.solaredge.com"
 
 @Serializable
 data class SolarEdgeConfig(
-    @SerialName("api-key") val apiKey: String,
+    @SerialName("site-api-key") val siteApiKey: String,
+    @SerialName("account-api-key") val accountApiKey: String = "",
     @SerialName("site-id") val siteID: String,
     @SerialName("account-id") val accountID: String,
     @SerialName("storage-profile-name") val storageProfileName: String,
@@ -29,7 +37,13 @@ data class SolarEdgeConfig(
 
 interface SolarEdgeApiService {
     @GET("currentPowerFlow")
-    suspend fun getPowerFlow(): SitePowerFlow
+    suspend fun getPowerFlow(): SitePowerFlowContainer
+
+    @GET("energyDetails")
+    suspend fun getEnergyDetails(@Query("startTime", encoded = true) startTime: String,
+                                 @Query("endTime", encoded = true) endTime: String,
+                                 @Query("timeUnit") timeUnit: String,
+                                 ): EnergyDetailsContainer
 }
 
 
@@ -46,8 +60,22 @@ class SolarEdgeApi(siteID: String, apiKey: String) {
         .client(client)
         .build()
 
-    val retrofitService: SolarEdgeApiService by lazy {
+    private val retrofitService: SolarEdgeApiService by lazy {
         retrofit.create(SolarEdgeApiService::class.java)
+    }
+
+    suspend fun getPowerFlow() = retrofitService.getPowerFlow().siteCurrentPowerFlow
+
+    suspend fun getEnergyDetails(
+        startTime: LocalDateTime,
+        endTime: LocalDateTime,
+        timeUnit: String = "DAY"
+    ): EnergyDetails {
+        val data = retrofitService.getEnergyDetails(
+            startTime.format(solarEdgeURLFormat),
+            endTime.format(solarEdgeURLFormat),
+            timeUnit)
+        return data.energyDetails
     }
 }
 
@@ -67,12 +95,23 @@ fun main(){
     val text = File("config.json").readText()
     val config = Json.decodeFromString<SolarEdgeConfig>(text)
 
-    var solarEdgeText: SitePowerFlow
+    val client = SolarEdgeApi(config.siteID, config.accountApiKey)
+    var powerFlow: SitePowerFlow
+    var energy: EnergyDetails
     runBlocking {
-        val def = async { SolarEdgeApi(config.siteID, config.apiKey).retrofitService.getPowerFlow() }
-        solarEdgeText = def.await()
+        val def = async { client.getPowerFlow() }
+        powerFlow = def.await()
+
+        val def2 = async {
+            client.getEnergyDetails(
+                LocalDateTime(2024, 5, 29, 0, 0, 0),
+                LocalDateTime(2024, 5, 30, 0, 0, 0)
+            )
+        }
+        energy = def2.await()
     }
-    println(solarEdgeText)
+    println(powerFlow)
+    println(energy)
 }
 
 /*
@@ -94,26 +133,6 @@ class SolarEdgeClient:
         self.site_id = site_id
         # Note all times are returned in the timezone of the site
         self.timezone = timezone
-
-    def api_request(self, function: str, params: dict = None) -> Dict:
-        if params is None:
-            params = {}
-        params = {key: _format_if_datetime(value) for key, value in params.items()}
-        params['api_key'] = self.api_key
-        url = '/'.join((API_URL, 'site', str(self.site_id), function))
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        return json.loads(response.text)
-
-    def get_power_flow(self):
-        data = self.api_request('currentPowerFlow')
-        logger.debug(data)
-        data = data['siteCurrentPowerFlow']
-        error_power = round(2**15 / 1000, 2)
-        if data['STORAGE']['currentPower'] == error_power:
-            data['STORAGE']['currentPower'] = 0
-            data['LOAD']['currentPower'] -= error_power
-        return data
 
     def get_energy_for_day(self, date: datetime.date) -> Dict[str, float]:
         output = self.get_energy_details(*day_start_end_times(date))
@@ -160,15 +179,6 @@ class SolarEdgeClient:
         logger.debug(json.dumps(data, indent=4))
         return data
 
-    def get_energy_details(self, start_time: datetime.datetime, end_time: datetime.datetime,
-                           time_unit: str = 'DAY'):
-        params = {'startTime': start_time, 'endTime': end_time, 'timeUnit': time_unit}
-        data = self.api_request('energyDetails', params)
-        logger.debug(json.dumps(data, indent=4))
-        data = data['energyDetails']
-        assert data['unit'] == 'Wh'
-        data = self.meter_list_to_dict(data['meters'])
-        return data
 
     def get_site_dates(self) -> Tuple[datetime.datetime, datetime.datetime]:
         date_range_data = self.api_request('dataPeriod')
