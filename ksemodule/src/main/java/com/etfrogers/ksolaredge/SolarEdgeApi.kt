@@ -2,12 +2,14 @@ package com.etfrogers.ksolaredge
 
 import com.etfrogers.ksolaredge.serialisers.EnergyDetails
 import com.etfrogers.ksolaredge.serialisers.EnergyDetailsContainer
+import com.etfrogers.ksolaredge.serialisers.Meters
 import com.etfrogers.ksolaredge.serialisers.SitePowerFlow
 import com.etfrogers.ksolaredge.serialisers.SitePowerFlowContainer
 import com.etfrogers.ksolaredge.serialisers.solarEdgeURLFormat
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.datetime.LocalDate
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import retrofit2.Retrofit
@@ -21,7 +23,13 @@ import okhttp3.Response
 import retrofit2.http.Query
 import java.io.File
 import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
+import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
+import kotlinx.datetime.toInstant
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.seconds
 
 private const val API_URL = "https://monitoringapi.solaredge.com"
 
@@ -47,7 +55,9 @@ interface SolarEdgeApiService {
 }
 
 
-class SolarEdgeApi(siteID: String, apiKey: String) {
+class SolarEdgeApi(siteID: String,
+                   apiKey: String,
+                   private val timezone: TimeZone = TimeZone.UTC) { //TimeZone.of("Europe/London")) {
     private val siteUrl = "$API_URL/site/${siteID}/"
     private val client = OkHttpClient.Builder()
         .addInterceptor(APIKeyInterceptor(apiKey))
@@ -77,9 +87,21 @@ class SolarEdgeApi(siteID: String, apiKey: String) {
             timeUnit)
         return data.energyDetails
     }
+
+    suspend fun getEnergyForDay(date: LocalDate): Meters {
+        val (start, end) = dayStartEndTimes(date)
+        val output = getEnergyDetails(start, end)
+        return output.meters
+    }
+
+
+    internal fun dayStartEndTimes(day: LocalDate): Pair<LocalDateTime, LocalDateTime> {
+        val start = LocalDateTime(day, LocalTime(0, 0, 0))
+        // period is inclusive, so if we don't subtract one second, we ge the first period of the next day too.
+        val end = (start.toInstant(timeZone = timezone) + 1.days - 1.seconds).toLocalDateTime(timezone)
+        return Pair(start, end)
+    }
 }
-
-
 class APIKeyInterceptor(private val apiKey: String) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val currentUrl = chain.request().url
@@ -97,16 +119,13 @@ fun main(){
 
     val client = SolarEdgeApi(config.siteID, config.accountApiKey)
     var powerFlow: SitePowerFlow
-    var energy: EnergyDetails
+    var energy: Meters
     runBlocking {
         val def = async { client.getPowerFlow() }
         powerFlow = def.await()
 
         val def2 = async {
-            client.getEnergyDetails(
-                LocalDateTime(2024, 5, 29, 0, 0, 0),
-                LocalDateTime(2024, 5, 30, 0, 0, 0)
-            )
+            client.getEnergyForDay(LocalDate(2024, 5, 29))
         }
         energy = def2.await()
     }

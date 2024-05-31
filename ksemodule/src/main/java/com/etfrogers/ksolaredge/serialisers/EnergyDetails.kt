@@ -2,8 +2,8 @@ package com.etfrogers.ksolaredge.serialisers
 
 import kotlinx.datetime.LocalDateTime
 import kotlinx.serialization.KSerializer
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
@@ -34,25 +34,58 @@ internal object MeterSerializer : KSerializer<Meters> {
     )
 
     override fun serialize(encoder: Encoder, value: Meters) {
-        val rawMeters = value.map {
-            RawMeter(it.key, it.value)
-        }
+        val rawMeters = listOfNotNull(
+            RawMeter.build("FeedIn", value.timestamps, value.feedIn),
+            RawMeter.build("Production", value.timestamps, value.production),
+            RawMeter.build("Purchased", value.timestamps, value.purchased),
+            RawMeter.build("Consumption", value.timestamps, value.consumption),
+        )
         encoder.encodeSerializableValue(ListSerializer(RawMeter.serializer()), rawMeters)
     }
 
     override fun deserialize(decoder: Decoder): Meters {
         val rawMeters = decoder.decodeSerializableValue(ListSerializer(RawMeter.serializer()))
-        return rawMeters.associate { it.type to it.values }
+        val allTimestamps = rawMeters.map { rawMeter ->  rawMeter.values.map{it.date} }
+        val refTimestamps = allTimestamps[0]
+        allTimestamps.forEach { ts ->
+            if (ts != refTimestamps) {
+                throw MismatchedTimestampsException("Deserialization of meters assumes all timestamps are equal.")
+            }
+        }
+        val map = rawMeters.associate {meter -> meter.type to meter.values.map{it.value} }
+        return Meters(refTimestamps,
+            production = map["Production"],
+            feedIn = map["FeedIn"],
+            purchased = map["Production"],
+            consumption = map["Production"],
+            )
     }
 }
 
-typealias Meters = Map<String, List<MeterTimepoint>>
+class MismatchedTimestampsException(msg: String): SerializationException(msg)
+
+data class Meters(
+    val timestamps: List<LocalDateTime>,
+    val production: List<Float?>? = listOf(),
+    val feedIn: List<Float?>? = listOf(),
+    val purchased: List<Float?>? = listOf(),
+    val consumption: List<Float?>? = listOf(),
+
+)
 
 @Serializable
 private data class RawMeter(
     val type: String,
-    val values: List<MeterTimepoint>
-)
+    val values: List<MeterTimepoint>,
+){
+    companion object Factory{
+        fun build(type: String, timestamps: List<LocalDateTime>, values: List<Float?>?) : RawMeter? {
+            if (values == null) return null
+            val meterPoints = timestamps.zip(values).map { (ts, value) -> MeterTimepoint(ts, value) }
+            return RawMeter(type, meterPoints)
+        }
+    }
+}
 
 
 @Serializable
@@ -61,6 +94,3 @@ data class MeterTimepoint(
     val date: LocalDateTime,
     val value: Float? = null
 )
-
-//@Serializable(SEDateTimeSerialiser)
-//data class SEDateTime: Lo
