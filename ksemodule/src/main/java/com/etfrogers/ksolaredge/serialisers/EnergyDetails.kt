@@ -13,11 +13,16 @@ import kotlinx.serialization.encoding.Encoder
 
 @Serializable
 data class EnergyDetailsContainer(
-    val energyDetails: EnergyDetails,
+    val energyDetails: MeterDetails,
 )
 
 @Serializable
-data class EnergyDetails(
+data class PowerDetailsContainer(
+    val powerDetails: MeterDetails,
+)
+
+@Serializable
+data class MeterDetails(
     val timeUnit: String,
     val unit: String,
     @Serializable(with = MeterSerializer::class) val meters: Meters

@@ -1,8 +1,8 @@
 package com.etfrogers.ksolaredge
 
-import com.etfrogers.ksolaredge.serialisers.EnergyDetails
 import com.etfrogers.ksolaredge.serialisers.EnergyDetailsContainer
-import com.etfrogers.ksolaredge.serialisers.Meters
+import com.etfrogers.ksolaredge.serialisers.MeterDetails
+import com.etfrogers.ksolaredge.serialisers.PowerDetailsContainer
 import com.etfrogers.ksolaredge.serialisers.SitePowerFlow
 import com.etfrogers.ksolaredge.serialisers.SitePowerFlowContainer
 import com.etfrogers.ksolaredge.serialisers.solarEdgeURLFormat
@@ -52,6 +52,12 @@ interface SolarEdgeApiService {
                                  @Query("endTime", encoded = true) endTime: String,
                                  @Query("timeUnit") timeUnit: String,
                                  ): EnergyDetailsContainer
+
+    @GET("powerDetails")
+    suspend fun getPowerDetails(@Query("startTime", encoded = true) startTime: String,
+                                 @Query("endTime", encoded = true) endTime: String,
+                                 @Query("timeUnit") timeUnit: String,
+    ): PowerDetailsContainer
 }
 
 
@@ -80,7 +86,7 @@ class SolarEdgeApi(siteID: String,
         startTime: LocalDateTime,
         endTime: LocalDateTime,
         timeUnit: String = "DAY"
-    ): EnergyDetails {
+    ): MeterDetails {
         val data = retrofitService.getEnergyDetails(
             startTime.format(solarEdgeURLFormat),
             endTime.format(solarEdgeURLFormat),
@@ -88,20 +94,43 @@ class SolarEdgeApi(siteID: String,
         return data.energyDetails
     }
 
-    suspend fun getEnergyForDay(date: LocalDate): Meters {
+    suspend fun getEnergyForDay(date: LocalDate): MeterDetails {
         val (start, end) = dayStartEndTimes(date)
-        val output = getEnergyDetails(start, end)
-        return output.meters
+        return getEnergyDetails(start, end)
     }
 
 
-    internal fun dayStartEndTimes(day: LocalDate): Pair<LocalDateTime, LocalDateTime> {
+    suspend fun getPowerHistoryForDay(date: LocalDate): MeterDetails {
+        val (start, end) = dayStartEndTimes(date)
+        val data = getPowerDetails(
+            start, end, timeUnit = "QUARTER_OF_AN_HOUR"
+        )
+        assert(data.timeUnit == "QUARTER_OF_AN_HOUR")
+        assert(data.unit == "W")
+        return data
+    }
+
+
+    suspend fun getPowerDetails(
+        startTime: LocalDateTime,
+        endTime: LocalDateTime,
+        timeUnit: String = "DAY"
+    ): MeterDetails {
+        val data = retrofitService.getPowerDetails(
+            startTime.format(solarEdgeURLFormat),
+            endTime.format(solarEdgeURLFormat),
+            timeUnit)
+        return data.powerDetails
+    }
+
+    private fun dayStartEndTimes(day: LocalDate): Pair<LocalDateTime, LocalDateTime> {
         val start = LocalDateTime(day, LocalTime(0, 0, 0))
         // period is inclusive, so if we don't subtract one second, we ge the first period of the next day too.
         val end = (start.toInstant(timeZone = timezone) + 1.days - 1.seconds).toLocalDateTime(timezone)
         return Pair(start, end)
     }
 }
+
 class APIKeyInterceptor(private val apiKey: String) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val currentUrl = chain.request().url
@@ -119,18 +148,26 @@ fun main(){
 
     val client = SolarEdgeApi(config.siteID, config.accountApiKey)
     var powerFlow: SitePowerFlow
-    var energy: Meters
+    var energy: MeterDetails
+    var power: MeterDetails
+    val day = LocalDate(2024, 5, 29)
     runBlocking {
         val def = async { client.getPowerFlow() }
         powerFlow = def.await()
 
         val def2 = async {
-            client.getEnergyForDay(LocalDate(2024, 5, 29))
+            client.getEnergyForDay(day)
         }
         energy = def2.await()
+
+        val def3 = async {
+            client.getPowerHistoryForDay(day)
+        }
+        power = def3.await()
     }
     println(powerFlow)
     println(energy)
+    println(power)
 }
 
 /*
@@ -152,51 +189,6 @@ class SolarEdgeClient:
         self.site_id = site_id
         # Note all times are returned in the timezone of the site
         self.timezone = timezone
-
-    def get_energy_for_day(self, date: datetime.date) -> Dict[str, float]:
-        output = self.get_energy_details(*day_start_end_times(date))
-        assert output['timestamps'].date() == date
-        return output
-
-    def get_power_history_for_day(self, date: datetime.date) -> Dict[str, np.ndarray]:
-        data = self.get_power_details(*day_start_end_times(date),
-                                      time_unit='QUARTER_OF_AN_HOUR')
-        details = data['powerDetails']
-        assert details['timeUnit'] == 'QUARTER_OF_AN_HOUR'
-        assert details['unit'] == 'W'
-        output = self.meter_list_to_dict(details['meters'])
-        return output
-
-    def meter_list_to_dict(self, meters: List) -> Dict[str, Union[float, np.ndarray]]:
-        timestamp_list = self.extract_time_stamps(meters[0]['values'], 'date')
-        single_entry = len(timestamp_list) == 1
-        if single_entry:
-            timestamps = timestamp_list[0]
-        else:
-            timestamps = np.array(timestamp_list)
-        output = {'timestamps': timestamps}
-        for meter_data in meters:
-            meter_name = meter_data['type']
-            values = meter_data['values']
-            assert self.extract_time_stamps(values, 'date') == timestamp_list
-            if single_entry:
-                powers = values[0]['value']
-            else:
-                powers = np.array([entry.get('value', 0) for entry in values])
-            output[meter_name] = powers
-        return output
-
-    def extract_time_stamps(self, value_list: List[dict], time_name: str) -> List[datetime.datetime]:
-        times = [datetime.datetime.strptime(entry[time_name], API_TIME_FORMAT) for entry in value_list]
-        times = [t.replace(tzinfo=self.timezone) for t in times]
-        return times
-
-    def get_power_details(self, start_time: datetime.datetime, end_time: datetime.datetime,
-                          time_unit: str = 'DAY'):
-        params = {'startTime': start_time, 'endTime': end_time, 'timeUnit': time_unit}
-        data = self.api_request('powerDetails', params)
-        logger.debug(json.dumps(data, indent=4))
-        return data
 
 
     def get_site_dates(self) -> Tuple[datetime.datetime, datetime.datetime]:
