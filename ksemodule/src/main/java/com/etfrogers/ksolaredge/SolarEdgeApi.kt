@@ -5,10 +5,14 @@ import com.etfrogers.ksolaredge.serialisers.MeterDetails
 import com.etfrogers.ksolaredge.serialisers.PowerDetailsContainer
 import com.etfrogers.ksolaredge.serialisers.SitePowerFlow
 import com.etfrogers.ksolaredge.serialisers.SitePowerFlowContainer
+import com.etfrogers.ksolaredge.serialisers.StorageData
+import com.etfrogers.ksolaredge.serialisers.StorageDataContainer
+import com.etfrogers.ksolaredge.serialisers.TelemetrySerializer
 import com.etfrogers.ksolaredge.serialisers.solarEdgeURLFormat
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -28,6 +32,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.seconds
 
@@ -58,12 +63,26 @@ interface SolarEdgeApiService {
                                  @Query("endTime", encoded = true) endTime: String,
                                  @Query("timeUnit") timeUnit: String,
     ): PowerDetailsContainer
+
+    @GET("storageData")
+    suspend fun getStorageData(@Query("startTime", encoded = true) startTime: String,
+                                @Query("endTime", encoded = true) endTime: String,
+    ): StorageDataContainer
+
 }
 
 
 class SolarEdgeApi(siteID: String,
                    apiKey: String,
                    private val timezone: TimeZone = TimeZone.UTC) { //TimeZone.of("Europe/London")) {
+
+    init {
+        if (TelemetrySerializer.timeZone != null && TelemetrySerializer.timeZone != timezone) {
+            throw Exception("Telemetry Serializer can only be set once")
+        }
+        TelemetrySerializer.timeZone = timezone
+    }
+
     private val siteUrl = "$API_URL/site/${siteID}/"
     private val client = OkHttpClient.Builder()
         .addInterceptor(APIKeyInterceptor(apiKey))
@@ -123,13 +142,55 @@ class SolarEdgeApi(siteID: String,
         return data.powerDetails
     }
 
+
+
+    suspend fun getBatteryHistoryForDay(date: LocalDate): StorageData {
+        val (start, end) = dayStartEndTimes(date)
+        return getBatteryHistory(start, end)
+    }
+
+/*
+    private fun integratePower(timestamps, powers): {
+        dt = np.diff(timestamps)
+        # assume first entry is the standard 5-minute interval.
+        dt = np.concatenate(([datetime.timedelta(minutes = 5)], dt))
+        dt_seconds = np.array([t.total_seconds() for t in dt])
+        dt_hours = dt_seconds / (60 * 60)
+        dt_hours = dt_hours
+        return np.sum(dt_hours * powers)
+    }
+*/
+    suspend fun getBatteryHistory(startTime: LocalDateTime, endTime: LocalDateTime): StorageData {
+        val data = retrofitService.getStorageData(
+            startTime.format(solarEdgeURLFormat),
+            endTime.format(solarEdgeURLFormat),
+            )
+        return data.storageData
+    }
+
+
     private fun dayStartEndTimes(day: LocalDate): Pair<LocalDateTime, LocalDateTime> {
         val start = LocalDateTime(day, LocalTime(0, 0, 0))
         // period is inclusive, so if we don't subtract one second, we ge the first period of the next day too.
         val end = (start.toInstant(timeZone = timezone) + 1.days - 1.seconds).toLocalDateTime(timezone)
         return Pair(start, end)
     }
+
 }
+
+internal fun timestampDiff(timestamps: List<LocalDateTime>, timezone: TimeZone): Duration {
+    val instants = timestamps.map { it.toInstant(timezone) }
+    val diff = instants[1] - instants[0]
+    for (i in 2..<timestamps.size){
+        val loopDiff = instants[i] - instants[i-1]
+        if ((loopDiff - diff).inWholeSeconds > 1)
+            throw TimestampParseError("Error finding timestamp differences. " +
+                    "First diff: {$diff}, this diff (at index $i): $loopDiff")
+    }
+    return diff
+}
+
+class TimestampParseError(msg: String): Exception(msg)
 
 class APIKeyInterceptor(private val apiKey: String) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
@@ -150,6 +211,7 @@ fun main(){
     var powerFlow: SitePowerFlow
     var energy: MeterDetails
     var power: MeterDetails
+    var battery: StorageData
     val day = LocalDate(2024, 5, 29)
     runBlocking {
         val def = async { client.getPowerFlow() }
@@ -164,10 +226,16 @@ fun main(){
             client.getPowerHistoryForDay(day)
         }
         power = def3.await()
+
+        val def4 = async {
+        client.getBatteryHistoryForDay(day)
+        }
+        battery = def4.await()
     }
     println(powerFlow)
     println(energy)
     println(power)
+    println(battery)
 }
 
 /*
@@ -209,58 +277,6 @@ class SolarEdgeClient:
             start_date = _start_of_next_month(start_date)
             end_date = _end_of_month(start_date)
 
-    def get_battery_history_for_day(self, date: datetime.date):
-        data = self.get_battery_history(*day_start_end_times(date))
-        data = data['storageData']
-        if data['batteryCount'] != 1:
-            raise NotImplementedError
-        data = data['batteries'][0]
-        timestamp_list = self.extract_time_stamps(data['telemetries'], 'timeStamp')
-        charge_power_from_grid = [entry['power']
-                                  if (entry['power'] is not None
-                                      and entry['power'] > 0
-                                      and entry['ACGridCharging'] > 0) else 0
-                                  for entry in data['telemetries']]
-        charge_power_from_solar = [entry['power']
-                                   if (entry['power'] is not None
-                                       and entry['power'] > 0
-                                       and entry['ACGridCharging'] == 0) else 0
-                                   for entry in data['telemetries']]
-        discharge_power = [-entry['power']
-                           if (entry['power'] is not None and entry['power'] < 0) else 0
-                           for entry in data['telemetries']]
-        charge_percentage = [entry['batteryPercentageState'] for entry in data['telemetries']]
-        charge_percentage = np.array(charge_percentage)
-        full_charge_energy = [entry['fullPackEnergyAvailable'] for entry in data['telemetries']]
-        full_charge_energy = np.array(full_charge_energy)
-        energy_stored = full_charge_energy * charge_percentage / 100
-        timestamps = np.array(timestamp_list)
-        output = {'timestamps': timestamps,
-                  'charge_power_from_grid': np.array(charge_power_from_grid),
-                  'discharge_power': np.array(discharge_power),
-                  'charge_power_from_solar': np.array(charge_power_from_solar),
-                  'charge_percentage': np.asarray(charge_percentage),
-                  'charge_from_grid_energy': sum([entry['ACGridCharging'] for entry in data['telemetries']]),
-                  'discharge_energy': self.integrate_power(timestamps, discharge_power),
-                  'charge_from_solar_energy': self.integrate_power(timestamps, charge_power_from_solar),
-                  'stored_energy': energy_stored
-                  }
-        return output
-
-    @staticmethod
-    def integrate_power(timestamps, powers):
-        dt = np.diff(timestamps)
-        # assume first entry is the standard 5-minute interval.
-        dt = np.concatenate(([datetime.timedelta(minutes=5)], dt))
-        dt_seconds = np.array([t.total_seconds() for t in dt])
-        dt_hours = dt_seconds / (60 * 60)
-        dt_hours = dt_hours
-        return np.sum(dt_hours * powers)
-
-    def get_battery_history(self, start_date: datetime.datetime, end_date: datetime.datetime):
-        battery_data = self.api_request('storageData',
-                                        {'startTime': start_date, 'endTime': end_date})
-        return battery_data
 
     def get_battery_history_for_site(self):
         site_start_date, site_end_date = self.get_site_dates()
@@ -298,10 +314,6 @@ def _format_if_datetime(value):
         return value
 
 
-def day_start_end_times(day: datetime.date):
-    start = datetime.datetime.combine(day, datetime.time(0), tzinfo=config.timezone)
-    # period is inclusive, so if we don't subtract one second, we ge the frst period of the next day too.
-    end = start + datetime.timedelta(days=1) - datetime.timedelta(seconds=1)
-    return start, end
+
 
  */

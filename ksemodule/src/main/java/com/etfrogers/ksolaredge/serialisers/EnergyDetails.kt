@@ -26,11 +26,7 @@ data class MeterDetails(
     val timeUnit: String,
     val unit: String,
     @Serializable(with = MeterSerializer::class) val meters: Meters
-) {
-//    init {
-//        val meters: Map<String, MeterValues> = metersList.associate { it.type to it.values }
-//    }
-}
+)
 
 internal object MeterSerializer : KSerializer<Meters> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(
