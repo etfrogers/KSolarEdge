@@ -34,16 +34,13 @@ data class Battery(
 )
 
 data class Telemetry(
-    val timestamps: List<LocalDateTime>,
-    val chargePowerFromGrid: List<Float>,
-    val chargeEnergyFromGrid: List<Float>,
-    val chargePowerFromSolar: List<Float>,
-    val dischargePower: List<Float>,
-    val chargePercentage: List<Float>,
-    val storedEnergy: List<Float>,
-//    val chargeFromGridEnergy: Float,
-//    val dischargeEnergy: Float,
-//    val chargeFromSolarEnergy: Float,
+    val timestamps: List<LocalDateTime> = listOf(),
+    val chargePowerFromGrid: List<Float> = listOf(),
+    val chargeEnergyFromGrid: List<Float> = listOf(),
+    val chargePowerFromSolar: List<Float> = listOf(),
+    val dischargePower: List<Float> = listOf(),
+    val chargePercentage: List<Float> = listOf(),
+    val storedEnergy: List<Float> = listOf(),
 )
 
 class TelemetrySerializer: KSerializer<Telemetry> {
@@ -55,9 +52,6 @@ class TelemetrySerializer: KSerializer<Telemetry> {
         val rawTelemetries = decoder.decodeSerializableValue(
             ListSerializer(RawTelemetry.serializer()))
         val timestamps = rawTelemetries.map { it.timestamp }
-//        val chargePowerFromGrid = rawTelemetries.map {
-//            if ((it.power > 0) && it.acGridCharging > 0) it.power else 0
-//        }
         val dischargePower = rawTelemetries.map {
             if (it.power < 0) -it.power else 0f
         }
@@ -90,21 +84,6 @@ class TelemetrySerializer: KSerializer<Telemetry> {
         throw NotImplementedError("Not yet implemented")
     }
 }
-
-/*
-    output = {
-        'timestamps': timestamps,
-        'charge_power_from_grid': np.array(charge_power_from_grid),
-        'discharge_power': np.array(discharge_power),
-        'charge_power_from_solar': np.array(charge_power_from_solar),
-        'charge_percentage': np.asarray(charge_percentage),
-        'charge_from_grid_energy': sum([entry['ACGridCharging'] for entry in data['telemetries']]),
-        'discharge_energy': self.integrate_power(timestamps, discharge_power),
-        'charge_from_solar_energy': self.integrate_power(timestamps, charge_power_from_solar),
-        'stored_energy': energy_stored
-    }
-    return output
-    */
 
 @Serializable
 data class RawTelemetry(
