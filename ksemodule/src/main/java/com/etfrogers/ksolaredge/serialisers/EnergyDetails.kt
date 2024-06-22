@@ -57,8 +57,8 @@ internal object MeterSerializer : KSerializer<Meters> {
         return Meters(refTimestamps,
             production = map["Production"],
             feedIn = map["FeedIn"],
-            purchased = map["Production"],
-            consumption = map["Production"],
+            purchased = map["Purchased"],
+            consumption = map["Consumption"],
             )
     }
 }
