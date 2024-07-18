@@ -206,12 +206,12 @@ fun main(){
     val text = File("config.json").readText()
     val config = Json.decodeFromString<SolarEdgeConfig>(text)
 
-    val client = SolarEdgeApi(config.siteID, config.accountApiKey)
+    val client = SolarEdgeApi(config.siteID, config.siteApiKey)
     var powerFlow: SitePowerFlow
     var energy: MeterDetails
     var power: MeterDetails
     var battery: StorageData
-    val day = LocalDate(2024, 5, 29)
+    val day = LocalDate(2024, 7, 18)
     runBlocking {
         val def = async { client.getPowerFlow() }
         powerFlow = def.await()
