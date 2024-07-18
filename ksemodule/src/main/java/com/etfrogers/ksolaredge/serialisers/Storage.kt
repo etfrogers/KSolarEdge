@@ -89,7 +89,7 @@ class TelemetrySerializer: KSerializer<Telemetry> {
 data class RawTelemetry(
     @Serializable(with = SEDateSerializer::class)
     @SerialName("timeStamp") val timestamp: LocalDateTime,
-    val power: Float,
+    @SerialName("power") private val rawPower: Float?,
     val batteryState: Int,
     val lifeTimeEnergyCharged: Float,
     val lifeTimeEnergyDischarged: Float,
@@ -97,4 +97,7 @@ data class RawTelemetry(
     val internalTemp: Float,
     @SerialName("ACGridCharging") val acGridCharging: Float,
     val batteryPercentageState: Float,
-)
+){
+    val power
+        get() = rawPower ?: Float.NaN
+}
