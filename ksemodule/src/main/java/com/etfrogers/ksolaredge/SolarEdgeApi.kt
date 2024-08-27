@@ -47,7 +47,7 @@ data class SolarEdgeConfig(
     )
 
 
-interface SolarEdgeApiService {
+internal interface SolarEdgeApiService {
     @GET("currentPowerFlow")
     suspend fun getPowerFlow(): SitePowerFlowContainer
 
@@ -109,7 +109,7 @@ class SolarEdgeApi(siteID: String,
             startTime.format(solarEdgeURLFormat),
             endTime.format(solarEdgeURLFormat),
             timeUnit)
-        return data.energyDetails
+        return data.energyDetails.toMeterDetails(timezone)
     }
 
     suspend fun getEnergyForDay(date: LocalDate): MeterDetails {
@@ -138,7 +138,7 @@ class SolarEdgeApi(siteID: String,
             startTime.format(solarEdgeURLFormat),
             endTime.format(solarEdgeURLFormat),
             timeUnit)
-        return data.powerDetails
+        return data.powerDetails.toMeterDetails(timezone)
     }
 
 
@@ -164,7 +164,7 @@ class SolarEdgeApi(siteID: String,
             startTime.format(solarEdgeURLFormat),
             endTime.format(solarEdgeURLFormat),
             )
-        return data.storageData
+        return data.storageData.toStorageData(timezone)
     }
 
 

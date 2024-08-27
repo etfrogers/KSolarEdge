@@ -1,8 +1,10 @@
 package com.etfrogers.ksolaredge.serialisers
 
 import com.etfrogers.ksolaredge.timestampDiff
+import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -14,27 +16,58 @@ import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 
 @Serializable
-data class StorageDataContainer(
-    val storageData: StorageData,
+internal data class StorageDataContainer(
+    val storageData: LocalStorageData,
 )
 
-@Serializable
 data class StorageData(
     val batteryCount: Int,
     val batteries: List<Battery>
 )
 
 @Serializable
+internal data class LocalStorageData(
+    val batteryCount: Int,
+    val batteries: List<LocalBattery>
+){
+    fun toStorageData(timezone: TimeZone): StorageData {
+        return StorageData(
+            this.batteryCount,
+            this.batteries.map { it.toBattery(timezone) }
+        )
+    }
+}
+
 data class Battery(
     val serialNumber: String,
     val nameplate: Float,
     val modelNumber: String,
     val telemetryCount: Int,
-    @Serializable(with = TelemetrySerializer::class) @SerialName("telemetries") val telemetry: Telemetry,
+    val telemetry: Telemetry,
 )
 
+
+@Serializable
+internal data class LocalBattery(
+    val serialNumber: String,
+    val nameplate: Float,
+    val modelNumber: String,
+    val telemetryCount: Int,
+    @Serializable(with = TelemetrySerializer::class) @SerialName("telemetries") val telemetry: LocalTelemetry,
+) {
+    fun toBattery(timezone: TimeZone): Battery {
+        return Battery(
+            serialNumber,
+            nameplate,
+            modelNumber,
+            telemetryCount,
+            telemetry.toTelemetry(timezone)
+        )
+    }
+}
+
 data class Telemetry(
-    val timestamps: List<LocalDateTime> = listOf(),
+    val timestamps: List<Instant> = listOf(),
     val chargePowerFromGrid: List<Float> = listOf(),
     val chargeEnergyFromGrid: List<Float> = listOf(),
     val chargePowerFromSolar: List<Float> = listOf(),
@@ -43,12 +76,34 @@ data class Telemetry(
     val storedEnergy: List<Float> = listOf(),
 )
 
-class TelemetrySerializer: KSerializer<Telemetry> {
+internal data class LocalTelemetry(
+    val timestamps: List<LocalDateTime> = listOf(),
+    val chargePowerFromGrid: List<Float> = listOf(),
+    val chargeEnergyFromGrid: List<Float> = listOf(),
+    val chargePowerFromSolar: List<Float> = listOf(),
+    val dischargePower: List<Float> = listOf(),
+    val chargePercentage: List<Float> = listOf(),
+    val storedEnergy: List<Float> = listOf(),
+) {
+    fun toTelemetry(timezone: TimeZone): Telemetry {
+        return Telemetry(
+            timestamps.map { it.toInstant(timezone) },
+            chargePowerFromGrid,
+            chargeEnergyFromGrid,
+            chargePowerFromSolar,
+            dischargePower,
+            chargePercentage,
+            storedEnergy,
+        )
+    }
+}
+
+internal class TelemetrySerializer: KSerializer<LocalTelemetry> {
     companion object {
         var timeZone: TimeZone? = null
     }
 
-    override fun deserialize(decoder: Decoder): Telemetry {
+    override fun deserialize(decoder: Decoder): LocalTelemetry {
         val rawTelemetries = decoder.decodeSerializableValue(
             ListSerializer(RawTelemetry.serializer()))
         val timestamps = rawTelemetries.map { it.timestamp }
@@ -66,7 +121,7 @@ class TelemetrySerializer: KSerializer<Telemetry> {
         val period = timestampDiff(timestamps, timeZone!!)
         val acGridChargingAveragePowerInPeriod = chargeEnergyFromGrid.map {
             it / period.inWholeSeconds }
-        return Telemetry(
+        return LocalTelemetry(
             timestamps = timestamps,
             chargePowerFromGrid = acGridChargingAveragePowerInPeriod,
             chargeEnergyFromGrid = chargeEnergyFromGrid,
@@ -80,7 +135,7 @@ class TelemetrySerializer: KSerializer<Telemetry> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(
         "Meter", PrimitiveKind.STRING)
 
-    override fun serialize(encoder: Encoder, value: Telemetry) {
+    override fun serialize(encoder: Encoder, value: LocalTelemetry) {
         throw NotImplementedError("Not yet implemented")
     }
 }
